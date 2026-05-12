@@ -100,7 +100,7 @@ st.markdown("""
 # --- INICIALIZACIÓN DE IA Y GUÍA TÉCNICA ---
 if os.path.exists("GEMINI_KEY.txt"):
     with open("GEMINI_KEY.txt", "r") as f:
-        genai.configure(api_key=f.read().strip())
+        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 
 guia_tecnica = ""
 if os.path.exists("GUIA_TECNICA_IA.txt"):
