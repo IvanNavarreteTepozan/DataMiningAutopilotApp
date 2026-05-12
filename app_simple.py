@@ -23,8 +23,8 @@ st.markdown("""
         color: #e2e8f0;
     }
     
-    /* Contenedores con Efecto Cristal */
-    [data-testid="stVerticalBlock"] > div:has(.stMarkdown) {
+    /* Contenedores con Efecto Cristal (Solo con contenido real, no el bloque de CSS) */
+    [data-testid="stVerticalBlock"] > div:has(.stMarkdown):not(:has(style)) {
         background: rgba(30, 41, 59, 0.5);
         backdrop-filter: blur(10px);
         border-radius: 20px;
@@ -93,6 +93,50 @@ st.markdown("""
     .stTabs [aria-selected="true"] {
         background-color: #10b981 !important;
         color: white !important;
+    }
+
+    /* Fuente global equilibrada */
+    .stMarkdown p, .stMarkdown li, .stTable, .stTextArea textarea, .stMarkdown span, .stMarkdown div {
+        font-size: 1.25rem !important;
+        line-height: 1.6 !important;
+    }
+
+    /* Títulos y Encabezados */
+    h1 { font-size: 2.8rem !important; }
+    h2 { font-size: 2.2rem !important; }
+    h3 { font-size: 1.8rem !important; }
+
+    /* Contenedores de altura igualada */
+    .equal-height-box {
+        height: 600px;
+        overflow-y: auto;
+        padding: 25px;
+        background: rgba(30, 41, 59, 0.3);
+        border-radius: 20px;
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        scrollbar-width: thin;
+        scrollbar-color: #10b981 #1e293b;
+    }
+
+    /* Caja de Ajuste (Fuera de columnas) */
+    .bottom-feedback-area {
+        margin-top: 30px;
+        padding: 30px;
+        background: rgba(15, 23, 42, 0.6);
+        border-radius: 25px;
+        border: 1px solid rgba(16, 185, 129, 0.2);
+    }
+
+    /* st.text (Subtítulo) a la mitad (1.5rem) */
+    [data-testid="stText"] {
+        font-size: 1.5rem !important;
+        line-height: 1.4 !important;
+        color: #94a3b8;
+    }
+
+    /* Ocultar bloques de markdown vacíos */
+    div:has(> .stMarkdown:empty) {
+        display: none;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -201,53 +245,45 @@ elif st.session_state.phase == "PROPUESTA":
         json_str = json_match.group(1) if json_match else "{}"
         explicacion = re.sub(r"```json.*?```", "", st.session_state.proposal, flags=re.DOTALL).strip()
         
-        # Diseño de Columnas para Propuesta y Configuración
-        col1, col2 = st.columns([2, 1])
+        # Diseño de Columnas Igualadas
+        col1, col2 = st.columns([1.6, 1.4], gap="large")
         
         with col1:
             st.markdown("### 📝 Propuesta Estratégica")
-            st.write(explicacion)
+            st.markdown(f'<div class="equal-height-box">{explicacion}</div>', unsafe_allow_html=True)
             
         with col2:
-            st.markdown("### 🛠️ Configuración del Pipeline")
+            st.markdown("### 🛠️ Configuración Técnica")
             try:
                 conf_data = json.loads(json_str)
-                target_val = conf_data.get('col_target', conf_data.get('target', 'No definido'))
-                model_val = conf_data.get('tipo_modelo', conf_data.get('modelo', 'No definido'))
+                st.markdown(f"**🎯 Target:** `{conf_data.get('col_target', 'Auto')}`")
+                st.markdown(f"**🧠 Modelo:** `{conf_data.get('tipo_modelo', 'Auto')}`")
+                st.markdown("### 📊 Tratamiento de nulos y columnas")
                 rules = conf_data.get('metodos_imputacion', conf_data.get('reglas_dict', {}))
-                
-                st.markdown(f"**🎯 Target:** `{target_val}`")
-                st.markdown(f"**🧠 Modelo:** `{model_val}`")
-                st.markdown(f"**🔍 Columnas detectadas con tratamiento especial:**")
-                
                 if rules:
                     table_data = []
                     for col, params in rules.items():
                         table_data.append({
                             "Columna": col,
-                            "Valor imputación": params.get("metodo", "Auto"),
-                            "Dummies": "✅" if params.get("Dummies") else "❌",
-                            "Lematizar": "✅" if params.get("Lematizar") else "❌"
+                            "Tratamiento": params.get("metodo", "Auto"),
+                            "Dummies": "✅" if params.get("Dummies") else "❌"
                         })
                     st.table(pd.DataFrame(table_data))
-                else:
-                    st.warning("Aún no se han definido reglas de imputación.")
-            except Exception:
-                st.error("Error al procesar la configuración técnica.")
+            except: st.error("Error en configuración JSON")
             
-            if st.button("✅ Aceptar y Ejecutar Pipeline"):
+            if st.button("🚀 Ejecutar Pipeline", use_container_width=True):
                 st.session_state.config_pipeline = json.loads(json_str)
                 st.session_state.phase = "EJECUCION"
                 st.rerun()
+        # SECCIÓN DE AJUSTES (FUERA DE COLUMNAS)
+        st.markdown("### 🎯 Refinar Plan y Recomendaciones")
+        feedback_val = st.text_area("Añade tus ajustes o contexto adicional:", placeholder="Ej: No utilices la columna X, cambia el modelo a Y, elimina la columna Z, etc...", label_visibility="collapsed")
         
-        st.write("---")
-        feedback = st.text_area("🎯 Contexto y Recomendaciones del Usuario:", placeholder="Ej: quiero usar otro modelo de ML")
-        instruction= f"Quiero que uses como referecia este json: {json_str} solo cambia lo que mencione el  siguiente feedback: "+ feedback
-        if st.button("🔄 Actualizar Propuesta"):
-            with st.spinner("🔄 El agente está ajustando el plan según tus recomendaciones..."):
+        if st.button("🔄 Actualizar Propuesta Estratégica", use_container_width=True):
+            instruction = f"Usa este json como base: {json_str}. Cambia solo lo que pida el feedback: {feedback_val}"
+            with st.spinner("🔄 Ajustando estrategia..."):
                 st.session_state.proposal = get_ia_proposal(st.session_state.df, instruction)
                 st.rerun()
-                
     with tab2:
         st.markdown("### 📊 Reporte Exploratorio Detallado")
         if not st.session_state.report_html:
@@ -303,7 +339,6 @@ elif st.session_state.phase == "RESULTADOS":
         explicacion = model_ia.generate_content(interp_prompt).text
         st.markdown(explicacion)
     
-    st.markdown("---")
     st.write(f"**Variables procesadas:** {', '.join(res['cols'])}")
     entrada = st.text_input("🎯 Realizar Predicción (formato CSV):")
     if st.button("Predecir"):
