@@ -1,0 +1,60 @@
+📘 GUÍA TÉCNICA PARA LA IA: reglas_dict
+
+Este documento define el formato exacto en que la IA debe generar la configuración para el método Clean_All_Rows.
+
+1. ESTRUCTURA DEL JSON OBLIGATORIA
+{
+  "target": "nombre_columna_objetivo",
+  "modelo": "Regresion_lineal" | "Regresion_logistica" | "Arbol_decision",
+  "reglas_dict": {
+    "columna_ejemplo": {
+      "metodo": "mean" | "median" | "mode" | "drop-values",
+      "valorDefecto": null,
+      "tolSustitucion": 0.05,
+      "tolMantenerCols": 0.1,
+      "Lematizar": False  | True,
+      "Dummies": False  | True,
+      "MaxDummies": 20,
+      "TargetEncoding": False  | True,
+      "WOE": False  | True,
+      "bins_woe": 5,
+      "Ordinal": False  | True ,
+      "orden": []
+    }
+  },
+  "EsPCA": false
+}
+
+2. PARÁMETROS PERMITIDOS (DENTRO DE CADA COLUMNA)
+- metodo (String): 'mean' (numéricas), 'median' (outliers), 'mode' (frecuente), 'drop-values' (borrar filas con nulos), 'drop-column' (borrar columna) .
+- valorDefecto (Any): Valor exacto para rellenar nulos (ignora 'metodo').
+- tolSustitucion (Float 0.0-1.0): Umbral para intentar sustitución.
+- tolMantenerCols (Float 0.0-1.0): Si supera este % de nulos, se borra la columna.
+- Lematizar (Bool): Solo para texto largo. Limpia y crea dummies de palabras.
+- Dummies (Bool): Fuerza One-Hot Encoding.
+- MaxDummies (Int): Límite de categorías antes de agrupar en "otros".
+- TargetEncoding (Bool): Reemplaza categorías por la media del target.
+- WOE (Bool): Weight of Evidence (solo si IV > 0.1).
+- Ordinal (Bool): Requiere el parámetro 'orden', si detectas que es una columna categorica ordinal,esto es util porque aplciara ordinal encodign en vez de dummies en caso de requerirlo.
+- orden (List): Lista con el orden lógico (ej: ["bajo", "medio", "alto"]).
+
+3. REGLAS DE ORO Y RESTRICCIONES
+- PROHIBIDO enviar la columna Target dentro de reglas_dict.
+- PROHIBIDO enviar la columna ID dentro de reglas_dict.
+- PROHIBIDO pedir 'Lematizar': true en columnas numéricas.
+- Solo usar columnas que existan en el dataset original.
+- Columnas casi constantes (>95% igual) se borrarán automáticamente; no es necesario pedirlos.
+- Los Outliers (IQR) se tratan automáticamente antes de los nulos.
+
+4. EJEMPLO DE CONFIGURACIÓN VÁLIDA
+{
+  "target": "precio_casa",
+  "modelo": "Regresion_lineal",
+  "reglas_dict": {
+    "descripcion": { "Lematizar": true },
+    "calidad": { "Ordinal": true, "orden": ["mala", "buena", "excelente"] },
+    "alcaldia": { "TargetEncoding": true },
+    "metros": { "metodo": "median" }
+  },
+  "EsPCA": false
+}

@@ -1,0 +1,305 @@
+from google.generativeai.types import file_types
+from google.ai import generativelanguage
+import streamlit as st
+import pandas as pd
+import json
+import os
+import asyncio
+import google.generativeai as genai
+from CleanData import Transformar_Df
+from MODELS import Regresion_lineal, Regresion_logistica, Arbol_decision
+from CargarDatos import AnalizarDatos
+import streamlit.components.v1 as components
+
+# --- CONFIGURACIÓN DE PÁGINA ---
+st.set_page_config(page_title="Autopilot", page_icon="⚡", layout="wide")
+
+# --- CSS PREMIUM ---
+st.markdown("""
+<style>
+    /* Fondo General Profundo */
+    .stApp {
+        background: radial-gradient(circle at top right, #1e293b, #0f172a);
+        color: #e2e8f0;
+    }
+    
+    /* Contenedores con Efecto Cristal */
+    [data-testid="stVerticalBlock"] > div:has(.stMarkdown) {
+        background: rgba(30, 41, 59, 0.5);
+        backdrop-filter: blur(10px);
+        border-radius: 20px;
+        padding: 25px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+        margin-bottom: 20px;
+    }
+
+    /* Títulos y Texto */
+    h1 {
+        background: linear-gradient(90deg, #10b981, #3b82f6);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        font-weight: 800 !important;
+        letter-spacing: -1px;
+    }
+    
+    h3 { color: #10b981 !important; font-weight: 600 !important; }
+
+    /* Botones Pro */
+    .stButton>button {
+        background: linear-gradient(135deg, #059669 0%, #10b981 100%) !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 12px !important;
+        font-weight: 700 !important;
+        padding: 0.75rem 1.5rem !important;
+        transition: all 0.3s ease !important;
+        box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3) !important;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }
+    
+    .stButton>button:hover {
+        transform: translateY(-2px) !important;
+        box-shadow: 0 6px 20px rgba(16, 185, 129, 0.5) !important;
+        background: linear-gradient(135deg, #10b981 0%, #34d399 100%) !important;
+    }
+
+    /* Tablas y JSON */
+    .stTable {
+        border-radius: 12px;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    
+    thead tr th {
+        background-color: #1e293b !important;
+        color: #10b981 !important;
+    }
+
+    /* Tabs Estilizados */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 10px;
+        background-color: transparent;
+    }
+
+    .stTabs [data-baseweb="tab"] {
+        background-color: #1e293b;
+        border-radius: 10px 10px 0 0;
+        padding: 10px 20px;
+        color: #94a3b8;
+    }
+
+    .stTabs [aria-selected="true"] {
+        background-color: #10b981 !important;
+        color: white !important;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# --- INICIALIZACIÓN DE IA Y GUÍA TÉCNICA ---
+if os.path.exists("GEMINI_KEY.txt"):
+    with open("GEMINI_KEY.txt", "r") as f:
+        genai.configure(api_key=f.read().strip())
+
+guia_tecnica = ""
+if os.path.exists("GUIA_TECNICA_IA.txt"):
+    with open("GUIA_TECNICA_IA.txt", "r", encoding="utf-8") as f:
+        guia_tecnica = f.read()
+
+model_ia = genai.GenerativeModel("gemini-2.5-flash")
+
+# --- LÓGICA DE NEGOCIO INTEGRADA ---
+def aplicar_limpieza_interna(df, col_target, reglas_dict=None):
+    transformador = Transformar_Df(df, col_target=col_target)
+    reporte = transformador.Clean_All_Rows(reglas_dict=reglas_dict)
+    return transformador, transformador.df, transformador.y
+
+def orquestador_modelos_interno(X, y, tipo_modelo):
+    m_type = tipo_modelo.lower()
+    if 'lineal' in m_type or 'regresion' in m_type:
+        json_res, modelo, cols = Regresion_lineal(X, y)
+    elif 'arbol' in m_type or 'decision' in m_type:
+        json_res, modelo, cols = Arbol_decision(X, y)
+    else:
+        json_res, modelo, cols = Regresion_logistica(X, y)
+    return modelo, json.loads(json_res), cols
+
+# --- ESTADO DE LA SESIÓN ---
+if "phase" not in st.session_state: st.session_state.phase = "CARGA"
+if "df" not in st.session_state: st.session_state.df = None
+if "proposal" not in st.session_state: st.session_state.proposal = None
+if "config_pipeline" not in st.session_state: st.session_state.config_pipeline = None
+if "results" not in st.session_state: st.session_state.results = None
+if "cleaner" not in st.session_state: st.session_state.cleaner = None
+if "report_html" not in st.session_state: st.session_state.report_html = None
+
+# --- FUNCIONES DE APOYO ---
+def get_ia_proposal(df, feedback=""):
+    dtypes = df.dtypes.apply(lambda x: str(x)).to_dict()
+    nulls = df.isnull().sum().to_dict()
+    
+    # Instrucciones dinámicas según si es actualización o inicio
+    narrativa_solicitada = ""
+    if feedback:
+        narrativa_solicitada = "EMPIEZA TU RESPUESTA DICIENDO: 'Entendido, he procesado tus ajustes. Este es el nuevo plan estratégico...'"
+    else:
+        narrativa_solicitada = "Presenta un plan inicial de ciencia de datos."
+
+    prompt = f"""
+    Eres un Consultor de Negocio y Estratega de Datos. 
+    Guía técnica interna: {guia_tecnica}
+    Metadatos: {json.dumps(dtypes)} | Nulos: {json.dumps(nulls)}
+    
+    INSTRUCCIONES DEL USUARIO: {feedback if feedback else 'Análisis inicial sin instrucciones previas.'}
+    
+    TAREA:
+    1. {narrativa_solicitada} Explica qué vas a hacer y por qué es valioso.
+    2. NUNCA menciones nombres de funciones técnicas (ej: Clean_All_Rows).
+    3. Al final, incluye el bloque JSON con: col_target, tipo_modelo y metodos_imputacion.
+    """
+    response = model_ia.generate_content(prompt)
+    return response.text
+
+# --- RENDERIZADO POR FASES ---
+st.title("⚡ Data Mining Autopilot")
+st.text("Proyecto para la automatización del preprocesamiento de datos y entrenamiento de modelos de machine learning")
+
+if st.session_state.phase == "CARGA":
+    uploaded_file = st.file_uploader("Sube tu archivo", type=["csv", "xlsx"])
+    if uploaded_file:
+        with st.spinner("🚀 Cargando y procesando datos..."):
+            if uploaded_file.name.endswith(".csv"): st.session_state.df = pd.read_csv(uploaded_file)
+            else: st.session_state.df = pd.read_excel(uploaded_file)
+            st.session_state.phase = "PROPUESTA"
+            st.rerun()
+
+elif st.session_state.phase == "PROPUESTA":
+    tab1, tab2 = st.tabs(["📝 Estrategia de IA", "📊 Reporte de Datos"])
+    
+    with tab1:
+        if not st.session_state.proposal:
+            with st.spinner("🧠 El agente está diseñando la estrategia inicial..."):
+                st.session_state.proposal = get_ia_proposal(st.session_state.df)
+        
+        import re
+        # Extraer JSON y limpiar texto
+        json_match = re.search(r"```json\s*(\{.*?\})\s*```", st.session_state.proposal, re.DOTALL)
+        json_str = json_match.group(1) if json_match else "{}"
+        explicacion = re.sub(r"```json.*?```", "", st.session_state.proposal, flags=re.DOTALL).strip()
+        
+        # Diseño de Columnas para Propuesta y Configuración
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            st.markdown("### 📝 Propuesta Estratégica")
+            st.write(explicacion)
+            
+        with col2:
+            st.markdown("### 🛠️ Configuración del Pipeline")
+            try:
+                conf_data = json.loads(json_str)
+                target_val = conf_data.get('col_target', conf_data.get('target', 'No definido'))
+                model_val = conf_data.get('tipo_modelo', conf_data.get('modelo', 'No definido'))
+                rules = conf_data.get('metodos_imputacion', conf_data.get('reglas_dict', {}))
+                
+                st.markdown(f"**🎯 Target:** `{target_val}`")
+                st.markdown(f"**🧠 Modelo:** `{model_val}`")
+                st.markdown(f"**🔍 Columnas detectadas con tratamiento especial:**")
+                
+                if rules:
+                    table_data = []
+                    for col, params in rules.items():
+                        table_data.append({
+                            "Columna": col,
+                            "Valor imputación": params.get("metodo", "Auto"),
+                            "Dummies": "✅" if params.get("Dummies") else "❌",
+                            "Lematizar": "✅" if params.get("Lematizar") else "❌"
+                        })
+                    st.table(pd.DataFrame(table_data))
+                else:
+                    st.warning("Aún no se han definido reglas de imputación.")
+            except Exception:
+                st.error("Error al procesar la configuración técnica.")
+            
+            if st.button("✅ Aceptar y Ejecutar Pipeline"):
+                st.session_state.config_pipeline = json.loads(json_str)
+                st.session_state.phase = "EJECUCION"
+                st.rerun()
+        
+        st.write("---")
+        feedback = st.text_area("🎯 Contexto y Recomendaciones del Usuario:", placeholder="Ej: quiero usar otro modelo de ML")
+        instruction= f"Quiero que uses como referecia este json: {json_str} solo cambia lo que mencione el  siguiente feedback: "+ feedback
+        if st.button("🔄 Actualizar Propuesta"):
+            with st.spinner("🔄 El agente está ajustando el plan según tus recomendaciones..."):
+                st.session_state.proposal = get_ia_proposal(st.session_state.df, instruction)
+                st.rerun()
+                
+    with tab2:
+        st.markdown("### 📊 Reporte Exploratorio Detallado")
+        if not st.session_state.report_html:
+            with st.spinner("Generando reporte interactivo de calidad de datos..."):
+                st.session_state.report_html = AnalizarDatos(st.session_state.df)
+        
+        components.html(st.session_state.report_html, height=1000, scrolling=True)
+
+elif st.session_state.phase == "EJECUCION":
+    conf = st.session_state.config_pipeline
+    try:
+        # Detección flexible de llaves
+        target = conf.get('col_target', conf.get('target'))
+        reglas = conf.get('metodos_imputacion', conf.get('reglas_dict', {}))
+        modelo_t = conf.get('tipo_modelo', conf.get('modelo', 'regresion_lineal'))
+
+        with st.spinner("🧹 Iniciando Limpieza Automatizada..."):
+            cleaner, X, y = aplicar_limpieza_interna(st.session_state.df, col_target=target, reglas_dict=reglas)
+            st.session_state.cleaner = cleaner
+        
+        with st.spinner(f"🧠 Optimizando y Entrenando {modelo_t}..."):
+            X_numeric = X.select_dtypes(include=['number'])
+            cols_eliminadas = set(X.columns) - set(X_numeric.columns)
+            if cols_eliminadas: st.warning(f"⚠️ Columnas eliminadas por seguridad: {list(cols_eliminadas)}")
+            
+            modelo_obj, metricas, cols = orquestador_modelos_interno(X_numeric, y, tipo_modelo=modelo_t)
+            st.session_state.results = {"modelo": modelo_obj, "metricas": metricas, "cols": cols}
+        
+        st.session_state.phase = "RESULTADOS"
+        st.rerun()
+    except Exception as e:
+        st.error(f"Error en el Pipeline: {e}")
+        if st.button("Reintentar Propuesta"): st.session_state.phase = "PROPUESTA"; st.rerun()
+
+elif st.session_state.phase == "RESULTADOS":
+    res = st.session_state.results
+    st.balloons()
+    
+    st.markdown("### 🧠 Interpretación Estratégica del Autopilot")
+    with st.spinner("Analizando resultados del modelo..."):
+        # Prompt robusto para interpretación profunda
+        interp_prompt = f"""
+        Actúa como un Consultor de Data Science Senior. Analiza estos resultados:
+        Métricas: {json.dumps(res['metricas'])}
+        Variables Usadas: {res['cols']}
+        
+        TAREA:
+        1. Explica la relevancia del modelo entrenado y su fiabilidad.
+        2. Traduce las métricas técnicas a impacto de negocio.
+        3. Detalla cómo influyeron las variables en el resultado.
+        4. Concluye con una recomendación estratégica.
+        """
+        explicacion = model_ia.generate_content(interp_prompt).text
+        st.markdown(explicacion)
+    
+    st.markdown("---")
+    st.write(f"**Variables procesadas:** {', '.join(res['cols'])}")
+    entrada = st.text_input("🎯 Realizar Predicción (formato CSV):")
+    if st.button("Predecir"):
+        try:
+            from io import StringIO
+            df_n = pd.read_csv(StringIO(entrada))
+            df_p = st.session_state.cleaner.transformar_nueva_tupla(df_n)
+            p = res['modelo'].predict(df_p[res['cols']])
+            st.success(f"Resultado Predicho: {p[0]}")
+        except Exception as e: st.error(f"Error: {e}")
+    
+    if st.button("🔄 Iniciar Nuevo Proyecto"): st.session_state.clear(); st.rerun()
