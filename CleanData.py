@@ -148,28 +148,35 @@ class Transformar_Df:
     # --- MÉTODOS PARA WOE (Weight of Evidence)---
     def calcular_woe_iv(self, df_temp, col, target_name):
         """Calcula el diccionario WOE y el valor IV total para una columna."""
-        # Asegurar que el target sea numérico para el cálculo matemático
-        df_temp[target_name] = pd.to_numeric(df_temp[target_name], errors='coerce').fillna(0)
+        # Asegurar que el target sea numérico (0/1) para el cálculo matemático
+        # Forzamos conversión a float para evitar errores de tipo en divisiones posteriores
+        target_series = pd.to_numeric(df_temp[target_name], errors='coerce').fillna(0).astype(float)
+        df_temp[target_name] = target_series
         
+        # Agregación por grupos
         stats = df_temp.groupby(col)[target_name].agg(['count', 'sum'])
         stats.columns = ['Total', 'Events']
+        
+        # Asegurar que las columnas de stats sean float para evitar ufunc errors
+        stats = stats.astype(float)
         stats['NonEvents'] = stats['Total'] - stats['Events']
         
         total_events = stats['Events'].sum()
         total_non_events = stats['NonEvents'].sum()
         
-        # Evitar división por cero
-        dist_events = stats['Events'] / (total_events if total_events > 0 else 1)
-        dist_non_events = stats['NonEvents'] / (total_non_events if total_non_events > 0 else 1)
+        # Evitar división por cero con un pequeño epsilon y asegurar casting float
+        dist_events = stats['Events'] / (float(total_events) if total_events > 0 else 1.0)
+        dist_non_events = stats['NonEvents'] / (float(total_non_events) if total_non_events > 0 else 1.0)
         
-        # Pequeño ajuste para evitar log(0) e inf
+        # Pequeño ajuste para evitar log(0) e inf (reemplazo seguro de ceros)
         dist_events = dist_events.replace(0, 0.0001)
         dist_non_events = dist_non_events.replace(0, 0.0001)
         
+        # El cociente también debe ser numérico puro
         woe_series = np.log(dist_non_events / dist_events)
         iv_series = (dist_non_events - dist_events) * woe_series
         
-        iv_total = iv_series.sum()
+        iv_total = float(iv_series.sum())
         woe_dict = woe_series.to_dict()
         
         return woe_dict, iv_total

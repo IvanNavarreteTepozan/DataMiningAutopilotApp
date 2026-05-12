@@ -98,16 +98,30 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- INICIALIZACIÓN DE IA Y GUÍA TÉCNICA ---
+api_key = None
+
+# 1. Intentar leer desde el archivo local
 if os.path.exists("GEMINI_KEY.txt"):
-    with open("GEMINI_KEY.txt", "r") as f:
-        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+        with open("GEMINI_KEY.txt", "r") as f:
+            api_key = f.read().strip()
+    
+# 2. Si no existe el archivo, intentar leer desde Streamlit Secrets
+elif "GEMINI_API_KEY" in st.secrets:
+        api_key = st.secrets["GEMINI_API_KEY"]
+
+    # 3. Configurar la API si se encontró una llave
+if api_key:
+        genai.configure(api_key=api_key)
+else:
+        st.error("🔑 No se encontró la API Key. Verifica GEMINI_KEY.txt o los Secrets de Streamlit.")
+        st.stop() 
 
 guia_tecnica = ""
 if os.path.exists("GUIA_TECNICA_IA.txt"):
     with open("GUIA_TECNICA_IA.txt", "r", encoding="utf-8") as f:
         guia_tecnica = f.read()
 
-model_ia = genai.GenerativeModel("gemini-2.5-flash")
+model_ia = genai.GenerativeModel("gemini-1.5-flash")
 
 # --- LÓGICA DE NEGOCIO INTEGRADA ---
 def aplicar_limpieza_interna(df, col_target, reglas_dict=None):
