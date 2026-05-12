@@ -109,7 +109,6 @@ if os.path.exists("GEMINI_KEY.txt"):
 elif "GEMINI_API_KEY" in st.secrets:
         api_key = st.secrets["GEMINI_API_KEY"]
 
-    # 3. Configurar la API si se encontró una llave
 if api_key:
         genai.configure(api_key=api_key)
 else:
