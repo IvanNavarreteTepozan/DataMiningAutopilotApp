@@ -1,10 +1,11 @@
 streamlit
 pandas
 numpy
+scipy
 scikit-learn
-google-genai
-joblib
+google-generativeai
 spacy
 nltk
+matplotlib
+joblib
 openpyxl
-python-dotenv
