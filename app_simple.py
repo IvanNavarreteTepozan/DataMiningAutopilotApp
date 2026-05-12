@@ -120,7 +120,7 @@ if os.path.exists("GUIA_TECNICA_IA.txt"):
     with open("GUIA_TECNICA_IA.txt", "r", encoding="utf-8") as f:
         guia_tecnica = f.read()
 
-model_ia = genai.GenerativeModel("gemini-1.5-flash")
+model_ia = genai.GenerativeModel("gemini-2.5-flash")
 
 # --- LÓGICA DE NEGOCIO INTEGRADA ---
 def aplicar_limpieza_interna(df, col_target, reglas_dict=None):

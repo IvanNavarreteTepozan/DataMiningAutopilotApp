@@ -213,16 +213,16 @@ class Transformar_Df:
     def SePuedeCategorizar(self, columna, max_categorias=20, min_prop=0.05):
         if columna not in self.df.columns: return False
         
-        freqs = self.df[columna].value_counts(normalize=False)
-        if freqs.empty or freqs.count() > max_categorias or freqs.count() <= 1:
+        freqs_norm = self.df[columna].value_counts(normalize=True)
+        if freqs_norm.empty or freqs_norm.count() > max_categorias or freqs_norm.count() <= 1:
             return False
         
-        categorias_invalidas = freqs[freqs <= min_prop].index.tolist()
-        suma_otros = freqs[freqs <= min_prop].sum()
+        categorias_invalidas = freqs_norm[freqs_norm <= min_prop].index.tolist()
+        suma_otros = freqs_norm[freqs_norm <= min_prop].sum()
         if suma_otros > 0.10:
             return False
         
-        num_categorias_finales = freqs.count() - len(categorias_invalidas)
+        num_categorias_finales = freqs_norm.count() - len(categorias_invalidas)
         if len(categorias_invalidas) > 0:
             num_categorias_finales += 1 
             
@@ -232,7 +232,7 @@ class Transformar_Df:
             return False
 
         # GUARDAR ESTADO: Guardar qué categorías son válidas
-        categorias_validas = freqs[freqs > min_prop].index.tolist()
+        categorias_validas = freqs_norm[freqs_norm > min_prop].index.tolist()
         self.categorias_validas[columna] = categorias_validas
 
         self.df[columna] = self.df[columna].where(self.df[columna].isin(categorias_validas), "otros")
@@ -317,20 +317,21 @@ class Transformar_Df:
                     reporte[-1]['metodo'] += ' / Borrada (No dummificable)'
 
         self.df.dropna(subset=[self.col_target_name], inplace=True)
+        
+        # --- CODIFICACIÓN AUTOMÁTICA DEL TARGET SI ES TEXTO ---
+        if ptypes.is_object_dtype(self.df[self.col_target_name]) or ptypes.is_string_dtype(self.df[self.col_target_name]):
+            from sklearn.preprocessing import LabelEncoder
+            le = LabelEncoder()
+            self.df[self.col_target_name] = le.fit_transform(self.df[self.col_target_name].astype(str))
+            
         self.y = self.df[self.col_target_name].copy()
         self.df.drop(columns=[self.col_target_name], inplace=True)
         
-        columnas_bool = self.df.select_dtypes(include=['bool']).columns
-        self.df[columnas_bool] = self.df[columnas_bool].astype(int)
-
-        # Eliminar columnas casi constantes (umbral 96% del mismo valor)
-        umbral_quasi_constante = 0.95
-        for col in list(self.df.columns):
-            if len(self.df) > 0:
-                frecuencias = self.df[col].value_counts(normalize=True)
-                if not frecuencias.empty and frecuencias.iloc[0] >= umbral_quasi_constante:
-                    self.df.drop(columns=[col], inplace=True)
-                    reporte.append({'columna': col, 'metodo': 'borrada-quasi-constante', 'Valor_de_relleno': None})
+        # Asegurar que todas las columnas sean numéricas puras antes del escalado
+        # Esto evita el error ufunc 'divide' al tratar con dtypes mixtos o booleanos residuales
+        for col in self.df.columns:
+            if ptypes.is_numeric_dtype(self.df[col]) or ptypes.is_bool_dtype(self.df[col]):
+                self.df[col] = pd.to_numeric(self.df[col], errors='coerce').fillna(0).astype(float)
 
         # GUARDAR ESTADO: Las columnas finales exactas antes de escalar
         self.columnas_entrenamiento = self.df.columns.tolist()
@@ -358,6 +359,7 @@ class Transformar_Df:
 
         # No re-adjuntamos el ID aquí para que no se use en el entrenamiento.
         # El ID se manejará únicamente en la fase de predicción/inferencia.
+        print(reporte)
         return reporte
 
     # --- 5. TRANSFORMACIÓN DE DATOS NUEVOS (REESCRITA) ---
