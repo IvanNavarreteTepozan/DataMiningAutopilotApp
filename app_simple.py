@@ -144,20 +144,27 @@ st.markdown("""
 # --- INICIALIZACIÓN DE IA Y GUÍA TÉCNICA ---
 api_key = None
 
-# 1. Intentar leer desde el archivo local
-if os.path.exists("GEMINI_KEY.txt"):
+# Prioridad 1: Streamlit Secrets (Producción)
+try:
+    if "GEMINI_API_KEY" in st.secrets:
+        api_key = st.secrets["GEMINI_API_KEY"]
+except:
+    # No hay secretos configurados (común en ejecución local)
+    pass
+
+# Prioridad 2: Archivo local (Desarrollo) si no se encontró en secretos
+if not api_key and os.path.exists("GEMINI_KEY.txt"):
+    try:
         with open("GEMINI_KEY.txt", "r") as f:
             api_key = f.read().strip()
-    
-# 2. Si no existe el archivo, intentar leer desde Streamlit Secrets
-elif "GEMINI_API_KEY" in st.secrets:
-        api_key = st.secrets["GEMINI_API_KEY"]
+    except:
+        pass
 
 if api_key:
-        genai.configure(api_key=api_key)
+    genai.configure(api_key=api_key)
 else:
-        st.error("🔑 No se encontró la API Key. Verifica GEMINI_KEY.txt o los Secrets de Streamlit.")
-        st.stop() 
+    st.error("🔑 No se encontró la API Key válida. Configura 'GEMINI_API_KEY' en los Secrets de Streamlit.")
+    st.stop()
 
 guia_tecnica = ""
 if os.path.exists("GUIA_TECNICA_IA.txt"):
@@ -204,16 +211,37 @@ def get_ia_proposal(df, feedback=""):
         narrativa_solicitada = "Presenta un plan inicial de ciencia de datos."
 
     prompt = f"""
-    Eres un Consultor de Negocio y Estratega de Datos. 
-    Guía técnica interna: {guia_tecnica}
-    Metadatos: {json.dumps(dtypes)} | Nulos: {json.dumps(nulls)}
+    Eres un Consultor de Negocio y Estratega de Datos experto.
+    
+    CONVOCATORIA TÉCNICA:
+    - Guía interna: {guia_tecnica}
+    - Metadatos del Dataset: {json.dumps(dtypes)}
+    - Valores Nulos: {json.dumps(nulls)}
     
     INSTRUCCIONES DEL USUARIO: {feedback if feedback else 'Análisis inicial sin instrucciones previas.'}
     
-    TAREA:
-    1. {narrativa_solicitada} Explica qué vas a hacer y por qué es valioso.
-    2. NUNCA menciones nombres de funciones técnicas (ej: Clean_All_Rows).
-    3. Al final, incluye el bloque JSON con: col_target, tipo_modelo y metodos_imputacion.
+    TU OBJETIVO:
+    1. {narrativa_solicitada} Explica la estrategia de negocio y por qué elegiste el modelo.
+    2. NUNCA menciones nombres de funciones técnicas internas de Python.
+    3. Es OBLIGATORIO que al final incluyas un bloque de código JSON con la siguiente estructura exacta:
+    
+    ```json
+    {{
+      "col_target": "NOMBRE_DE_LA_COLUMNA_OBJETIVO",
+      "tipo_modelo": "regresion_lineal" | "regresion_logistica" | "arbol_decision",
+      "metodos_imputacion": {{
+        "NOMBRE_COLUMNA": {{
+          "metodo": "mean" | "median" | "mode" | "drop-column",
+          "Dummies": true | false
+        }}
+      }}
+    }}
+    ```
+
+    IMPORTANTE: 
+    - `col_target` DEBE ser una columna existente en los metadatos.
+    - `tipo_modelo` DEBE ser uno de los tres valores permitidos.
+    - El JSON debe ser válido y estar al final de tu respuesta.
     """
     response = model_ia.generate_content(prompt)
     return response.text
@@ -226,8 +254,14 @@ if st.session_state.phase == "CARGA":
     uploaded_file = st.file_uploader("Sube tu archivo", type=["csv", "xlsx"])
     if uploaded_file:
         with st.spinner("🚀 Cargando y procesando datos..."):
-            if uploaded_file.name.endswith(".csv"): st.session_state.df = pd.read_csv(uploaded_file)
-            else: st.session_state.df = pd.read_excel(uploaded_file)
+            if uploaded_file.name.endswith(".csv"):
+                try:
+                    st.session_state.df = pd.read_csv(uploaded_file, encoding='utf-8')
+                except UnicodeDecodeError:
+                    uploaded_file.seek(0)
+                    st.session_state.df = pd.read_csv(uploaded_file, encoding='latin1')
+            else:
+                st.session_state.df = pd.read_excel(uploaded_file)
             st.session_state.phase = "PROPUESTA"
             st.rerun()
 
@@ -256,8 +290,8 @@ elif st.session_state.phase == "PROPUESTA":
             st.markdown("### 🛠️ Configuración Técnica")
             try:
                 conf_data = json.loads(json_str)
-                st.markdown(f"**🎯 Target:** `{conf_data.get('col_target', 'Auto')}`")
-                st.markdown(f"**🧠 Modelo:** `{conf_data.get('tipo_modelo', 'Auto')}`")
+                st.markdown(f"**🎯 Target:** `{conf_data.get('col_target')}`")
+                st.markdown(f"**🧠 Modelo:** `{conf_data.get('tipo_modelo')}`")
                 st.markdown("### 📊 Tratamiento de nulos y columnas")
                 rules = conf_data.get('metodos_imputacion', conf_data.get('reglas_dict', {}))
                 if rules:
@@ -265,7 +299,7 @@ elif st.session_state.phase == "PROPUESTA":
                     for col, params in rules.items():
                         table_data.append({
                             "Columna": col,
-                            "Tratamiento": params.get("metodo", "Auto"),
+                            "Tratamiento": params.get("metodo"),
                             "Dummies": "✅" if params.get("Dummies") else "❌"
                         })
                     st.table(pd.DataFrame(table_data))
@@ -303,6 +337,14 @@ elif st.session_state.phase == "EJECUCION":
         with st.spinner("🧹 Iniciando Limpieza Automatizada..."):
             cleaner, X, y = aplicar_limpieza_interna(st.session_state.df, col_target=target, reglas_dict=reglas)
             st.session_state.cleaner = cleaner
+            
+            # --- GUARDADO AUTOMÁTICO INTERNO ---
+            try:
+                df_export = pd.concat([X, y], axis=1)
+                df_export.to_excel("dataset_limpio.xlsx", index=False)
+                st.success("✅ Dataset limpio guardado como 'dataset_limpio.xlsx'")
+            except Exception as e:
+                st.warning(f"Error al guardar excel: {e}")
         
         with st.spinner(f"🧠 Optimizando y Entrenando {modelo_t}..."):
             X_numeric = X.select_dtypes(include=['number'])
